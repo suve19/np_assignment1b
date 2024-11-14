@@ -5,6 +5,7 @@
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/time.h>
 #include "protocol.h"
 
 void printUsageAndExit() {
@@ -20,6 +21,48 @@ bool isNotOkMessage(const calcMessage& response) {
         return true;
     }
     return false;
+}
+
+// Function to send a message and retry on timeout up to 3 times
+bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& message, calcMessage& response) {
+    const int maxRetries = 3;
+    const int timeoutSec = 2;
+    socklen_t addrLen = res->ai_addrlen;
+
+    for (int attempt = 1; attempt <= maxRetries; ++attempt) {
+        // Send the message
+        ssize_t sentBytes = sendto(sockfd, &message, sizeof(message), 0, res->ai_addr, res->ai_addrlen);
+        if (sentBytes < 0) {
+            perror("Failed to send message");
+            return false;
+        }
+
+        // Set up the timeout for receiving
+        struct timeval timeout;
+        timeout.tv_sec = timeoutSec;
+        timeout.tv_usec = 0;
+
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(sockfd, &readfds);
+
+        // Wait for a response with the timeout
+        int selectResult = select(sockfd + 1, &readfds, nullptr, nullptr, &timeout);
+        if (selectResult > 0 && FD_ISSET(sockfd, &readfds)) {
+            // Receive the response from the server
+            ssize_t receivedBytes = recvfrom(sockfd, &response, sizeof(response), 0, res->ai_addr, &addrLen);
+            if (receivedBytes > 0) {
+                return true;  // Received the response successfully
+            } else {
+                perror("Failed to receive response");
+            }
+        } else if (selectResult < 0) {
+            perror("Error in select");
+            return false;
+        }
+    }
+    std::cerr << "TERMINATING AFTER  RETRYING FOR THREE TIMES." << std::endl;
+    return false;  // No response after maximum retries
 }
 
 int main(int argc, char *argv[]) {
@@ -56,29 +99,20 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Prepare and send the calcMessage to the server.
+    // Prepare the initial calcMessage to send to the server.
     calcMessage message;
-    memset(&message, 0, sizeof(message)); // Initialize to zero
+    memset(&message, 0, sizeof(message));
     message.type = htons(22);             // Client-to-server binary protocol
     message.message = htonl(0);           // First message
     message.protocol = htons(17);         // UDP protocol
     message.major_version = htons(1);     // Protocol version 1.0
     message.minor_version = htons(0);
 
-    ssize_t sentBytes = sendto(sockfd, &message, sizeof(message), 0, res->ai_addr, res->ai_addrlen);
-    if (sentBytes < 0) {
-        perror("Failed to send message");
-        close(sockfd);
-        freeaddrinfo(res);
-        exit(EXIT_FAILURE);
-    }
-
-    // Receive the response from the server.
+    // Prepare the response buffer
     calcMessage response;
-    socklen_t addrLen = res->ai_addrlen;
-    ssize_t receivedBytes = recvfrom(sockfd, &response, sizeof(response), 0, res->ai_addr, &addrLen);
 
-    if (receivedBytes > 0) {
+    // Attempt to send and receive response with retries
+    if (sendAndReceiveWithRetry(sockfd, res, message, response)) {
         // Check if response is "NOT OK"
         if (isNotOkMessage(response)) {
             close(sockfd);
@@ -93,8 +127,6 @@ int main(int argc, char *argv[]) {
         std::cout << "Protocol: " << ntohs(response.protocol) << std::endl;
         std::cout << "Major Version: " << ntohs(response.major_version) << std::endl;
         std::cout << "Minor Version: " << ntohs(response.minor_version) << std::endl;
-    } else {
-        perror("Failed to receive response");
     }
 
     // Clean up
