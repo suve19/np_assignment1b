@@ -1,5 +1,3 @@
-
-
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -14,13 +12,23 @@ void printUsageAndExit() {
     exit(EXIT_FAILURE);
 }
 
+// Function to check and print "NOT OK" message
+bool isNotOkMessage(const calcMessage& response) {
+    if (ntohs(response.type) == 2 && ntohl(response.message) == 2 &&
+        ntohs(response.major_version) == 1 && ntohs(response.minor_version) == 0) {
+        std::cerr << "Server sent a 'NOT OK' message. Terminating client." << std::endl;
+        return true;
+    }
+    return false;
+}
+
 int main(int argc, char *argv[]) {
     // Validate input and print usage.
     if (argc != 3) {
         printUsageAndExit();
     }
 
-    // Parse the server address and port from input. 
+    // Parse the server address and port from input.
     const char* serverAddress = argv[1];
     int port = std::atoi(argv[2]);
 
@@ -31,8 +39,8 @@ int main(int argc, char *argv[]) {
 
     // Resolve the address (IPv4, IPv6, and DNS)
     struct addrinfo hints{}, *res;
-    hints.ai_family = AF_UNSPEC;        
-    hints.ai_socktype = SOCK_DGRAM;     
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
 
     int status = getaddrinfo(serverAddress, argv[2], &hints, &res);
     if (status != 0) {
@@ -40,7 +48,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Create a UDP socket. 
+    // Create a UDP socket.
     int sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (sockfd < 0) {
         perror("Socket creation failed");
@@ -65,18 +73,26 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Receive the response from the server. 
-    calcProtocol response;
+    // Receive the response from the server.
+    calcMessage response;
     socklen_t addrLen = res->ai_addrlen;
     ssize_t receivedBytes = recvfrom(sockfd, &response, sizeof(response), 0, res->ai_addr, &addrLen);
 
     if (receivedBytes > 0) {
+        // Check if response is "NOT OK"
+        if (isNotOkMessage(response)) {
+            close(sockfd);
+            freeaddrinfo(res);
+            return EXIT_FAILURE;
+        }
+
+        // If not a "NOT OK" message, proceed to print the message details
         std::cout << "Received response from server:" << std::endl;
         std::cout << "Type: " << ntohs(response.type) << std::endl;
+        std::cout << "Message: " << ntohl(response.message) << std::endl;
+        std::cout << "Protocol: " << ntohs(response.protocol) << std::endl;
         std::cout << "Major Version: " << ntohs(response.major_version) << std::endl;
         std::cout << "Minor Version: " << ntohs(response.minor_version) << std::endl;
-        std::cout << "ID: " << ntohl(response.id) << std::endl;
-        std::cout << "Arith: " << ntohl(response.arith) << std::endl;
     } else {
         perror("Failed to receive response");
     }
