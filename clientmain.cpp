@@ -8,13 +8,14 @@
 #include <sys/time.h>
 #include "protocol.h"
 
+
+// Function to print usage and exit
 void printUsageAndExit() {
     std::cerr << "Usage: ./client <IP/DNS> <Port>" << std::endl;
     exit(EXIT_FAILURE);
 }
-
 // Function to check and print "NOT OK" message
-bool isNotOkMessage(const calcMessage& response) {
+bool isNotOkMessage(const calcMessage& response) { 
     if (ntohs(response.type) == 2 && ntohl(response.message) == 2 &&
         ntohs(response.major_version) == 1 && ntohs(response.minor_version) == 0) {
         std::cerr << "Server sent a 'NOT OK' message. Terminating client." << std::endl;
@@ -23,8 +24,8 @@ bool isNotOkMessage(const calcMessage& response) {
     return false;
 }
 
-// Function to send a message and retry on timeout up to 3 times
-bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& message, calcMessage& response) {
+// Function to send and receive message with retry
+bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& message, calcProtocol& response) {
     const int maxRetries = 3;
     const int timeoutSec = 2;
     socklen_t addrLen = res->ai_addrlen;
@@ -37,7 +38,7 @@ bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& mess
             return false;
         }
 
-        // Set up the timeout for receiving
+        // Set up timeout for receiving
         struct timeval timeout;
         timeout.tv_sec = timeoutSec;
         timeout.tv_usec = 0;
@@ -46,13 +47,13 @@ bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& mess
         FD_ZERO(&readfds);
         FD_SET(sockfd, &readfds);
 
-        // Wait for a response with the timeout
+        // Wait for response with timeout
         int selectResult = select(sockfd + 1, &readfds, nullptr, nullptr, &timeout);
         if (selectResult > 0 && FD_ISSET(sockfd, &readfds)) {
             // Receive the response from the server
             ssize_t receivedBytes = recvfrom(sockfd, &response, sizeof(response), 0, res->ai_addr, &addrLen);
             if (receivedBytes > 0) {
-                return true;  // Received the response successfully
+                return true;  // Successfully received the response
             } else {
                 perror("Failed to receive response");
             }
@@ -61,7 +62,8 @@ bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& mess
             return false;
         }
     }
-    std::cerr << "TERMINATING AFTER  RETRYING FOR THREE TIMES." << std::endl;
+
+    std::cerr << "No response from server after " << maxRetries << " attempts. Terminating." << std::endl;
     return false;  // No response after maximum retries
 }
 
@@ -108,25 +110,22 @@ int main(int argc, char *argv[]) {
     message.major_version = htons(1);     // Protocol version 1.0
     message.minor_version = htons(0);
 
-    // Prepare the response buffer
-    calcMessage response;
+    // Prepare the response buffer and message count
+    calcProtocol response;
 
     // Attempt to send and receive response with retries
     if (sendAndReceiveWithRetry(sockfd, res, message, response)) {
-        // Check if response is "NOT OK"
-        if (isNotOkMessage(response)) {
-            close(sockfd);
-            freeaddrinfo(res);
-            return EXIT_FAILURE;
-        }
-
-        // If not a "NOT OK" message, proceed to print the message details
+        // Print the message received from the server
         std::cout << "Received response from server:" << std::endl;
         std::cout << "Type: " << ntohs(response.type) << std::endl;
-        std::cout << "Message: " << ntohl(response.message) << std::endl;
-        std::cout << "Protocol: " << ntohs(response.protocol) << std::endl;
-        std::cout << "Major Version: " << ntohs(response.major_version) << std::endl;
-        std::cout << "Minor Version: " << ntohs(response.minor_version) << std::endl;
+        std::cout << "ID: " << ntohl(response.id) << std::endl;
+        std::cout << "Arith: " << ntohl(response.arith) << std::endl;
+        std::cout << "InValue1: " << ntohl(response.inValue1) << std::endl;
+        std::cout << "InValue2: " << ntohl(response.inValue2) << std::endl;
+        std::cout << "InResult: " << ntohl(response.inResult) << std::endl;
+        std::cout << "FlValue1: " << response.flValue1 << std::endl;
+        std::cout << "FlValue2: " << response.flValue2 << std::endl;
+        std::cout << "FlResult: " << response.flResult << std::endl;
     }
 
     // Clean up
