@@ -24,6 +24,63 @@ bool isNotOkMessage(const calcMessage& response) {
     return false;
 }
 
+
+// Perform the operation based on arith value and update results
+void performCalculation(calcProtocol& response) {
+    int arith = ntohl(response.arith);
+    int intValue1 = ntohl(response.inValue1);
+    int intValue2 = ntohl(response.inValue2);
+    double flValue1 = response.flValue1;  
+    double flValue2 = response.flValue2;  
+
+    switch (arith) {
+        case 1:  // add
+            response.inResult = htonl(intValue1 + intValue2);
+            std::cout << "Assignment: add " << intValue1 << " " << intValue2 << std::endl;
+            break;
+        case 2:  // sub
+            response.inResult = htonl(intValue1 - intValue2);
+            std::cout << "Assignment: sub " << intValue1 << " " << intValue2 << std::endl;
+            break;
+        case 3:  // mul
+            response.inResult = htonl(intValue1 * intValue2);
+            std::cout << "Assignment: mul " << intValue1 << " " << intValue2 << std::endl;
+            break;
+        case 4:  // div
+            if (intValue2 != 0) {
+                response.inResult = htonl(intValue1 / intValue2);
+                std::cout << "Assignment: mul " << intValue1 << " "<< intValue2 << std::endl;
+            } else {
+                std::cerr << "Division by zero error!" << std::endl;
+            }
+            break;
+        case 5:  // fadd
+            response.flResult = flValue1 + flValue2;
+            std::cout << "Assignment: fadd " << flValue1 << " " << flValue2 << std::endl;
+            break;
+        case 6:  // fsub
+            response.flResult = flValue1 - flValue2;
+            std::cout << "Assignment: fsub " << flValue1 << " " << flValue2 << std::endl;
+            break;
+        case 7:  // fmul
+            response.flResult = flValue1 * flValue2;
+            std::cout << "Assignment: fmul " << flValue1 << " " << flValue2 << std::endl;
+            break;
+        case 8:  // fdiv
+            if (flValue2 != 0.0) {
+                response.flResult = flValue1 / flValue2;
+                std::cout << "Assignment: fdiv " << flValue1 << " " << flValue2 << std::endl;
+            } else {
+                std::cerr << "Division by zero error!" << std::endl;
+            }
+            break;
+        default:
+            std::cerr << "Invalid arithmetic operation code: " << arith << std::endl;
+            break;
+    }
+}
+
+
 // Function to send and receive message with retry
 bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& message, calcProtocol& response) {
     const int maxRetries = 3;
@@ -115,18 +172,8 @@ int main(int argc, char *argv[]) {
 
     // Attempt to send and receive response with retries
     if (sendAndReceiveWithRetry(sockfd, res, message, response)) {
-        // Print the message received from the server
-        std::cout << "Received response from server:" << std::endl;
-        std::cout << "Type: " << ntohs(response.type) << std::endl;
-        std::cout << "ID: " << ntohl(response.id) << std::endl;
-        std::cout << "Arith: " << ntohl(response.arith) << std::endl;
-        std::cout << "InValue1: " << ntohl(response.inValue1) << std::endl;
-        std::cout << "InValue2: " << ntohl(response.inValue2) << std::endl;
-        std::cout << "InResult: " << ntohl(response.inResult) << std::endl;
-        std::cout << "FlValue1: " << response.flValue1 << std::endl;
-        std::cout << "FlValue2: " << response.flValue2 << std::endl;
-        std::cout << "FlResult: " << response.flResult << std::endl;
-    }
+    performCalculation(response);
+}
 
     // Clean up
     close(sockfd);
