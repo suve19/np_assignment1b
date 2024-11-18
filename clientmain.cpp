@@ -7,11 +7,12 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include "protocol.h"
+#include <cstdio>
 
 
 // Function to print usage and exit
 void printUsageAndExit() {
-    std::cerr << "Usage: ./client <IP/DNS> <Port>" << std::endl;
+    std::cerr << "Usage: ./client <IP/DNS>:<Port>" << std::endl;
     exit(EXIT_FAILURE);
 }
 // Function to check and print "NOT OK" message
@@ -22,6 +23,30 @@ bool isNotOkMessage(const calcMessage& response) {
         return true;
     }
     return false;
+}
+
+
+// Function to split the input into IP and port
+bool parseIpPort(const std::string& input, std::string& ip, int& port) {
+
+    size_t delimiterPos = input.find(':');
+    if (delimiterPos == std::string::npos) {
+        return false; // ':' not found
+    }
+
+    ip = input.substr(0, delimiterPos);
+    std::string portStr = input.substr(delimiterPos + 1);
+
+    try {
+        port = std::stoi(portStr);
+        if (port <= 0 || port > 65535) {
+            throw std::out_of_range("Invalid port");
+        }
+    } catch (...) {
+        return false; // Port is not a valid number or out of range
+    }
+    printf("Host: %s, Port: %d.\n", ip.c_str(), port);
+    return true;
 }
 
 void performCalculation(calcProtocol& response, int sockfd, struct addrinfo* res) {
@@ -169,16 +194,16 @@ bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& mess
 
 int main(int argc, char *argv[]) {
     // Validate input and print usage.
-    if (argc != 3) {
+    if (argc != 2) {
         printUsageAndExit();
     }
 
-    // Parse the server address and port from input.
-    const char* serverAddress = argv[1];
-    int port = std::atoi(argv[2]);
+    std::string serverAddress, ip;
+    int port;
 
-    if (port <= 0 || port > 65535) {
-        std::cerr << "Invalid port number." << std::endl;
+    serverAddress = argv[1];
+    if (!parseIpPort(serverAddress, ip, port)) {
+        std::cerr << "Invalid input format. Expected <IP>:<Port>." << std::endl;
         printUsageAndExit();
     }
 
@@ -187,13 +212,13 @@ int main(int argc, char *argv[]) {
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
 
-    int status = getaddrinfo(serverAddress, argv[2], &hints, &res);
+    int status = getaddrinfo(ip.c_str(), std::to_string(port).c_str(), &hints, &res);
     if (status != 0) {
         std::cerr << "Error resolving address: " << gai_strerror(status) << std::endl;
         exit(EXIT_FAILURE);
     }
 
-    // Create a UDP socket.
+    // Create a UDP socket
     int sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (sockfd < 0) {
         perror("Socket creation failed");
@@ -201,7 +226,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Prepare the initial calcMessage to send to the server.
+    // Prepare the initial calcMessage to send to the server
     calcMessage message;
     memset(&message, 0, sizeof(message));
     message.type = htons(22);             // Client-to-server binary protocol
@@ -215,8 +240,8 @@ int main(int argc, char *argv[]) {
 
     // Attempt to send and receive response with retries
     if (sendAndReceiveWithRetry(sockfd, res, message, response)) {
-     performCalculation(response, sockfd, res);
-}
+        performCalculation(response, sockfd, res);
+    }
 
     // Clean up
     close(sockfd);
