@@ -24,9 +24,7 @@ bool isNotOkMessage(const calcMessage& response) {
     return false;
 }
 
-
-// Perform the operation based on arith value and update results
-void performCalculation(calcProtocol& response) {
+void performCalculation(calcProtocol& response, int sockfd, struct addrinfo* res) {
     int arith = ntohl(response.arith);
     int intValue1 = ntohl(response.inValue1);
     int intValue2 = ntohl(response.inValue2);
@@ -34,52 +32,97 @@ void performCalculation(calcProtocol& response) {
     double flValue2 = response.flValue2;  
 
     switch (arith) {
-        case 1:  // add
+        case 1:  // Addition
             response.inResult = htonl(intValue1 + intValue2);
-            std::cout << "Assignment: add " << intValue1 << " " << intValue2 << std::endl;
+            std::cout << "ASSIGNMENT: add " << intValue1 << " " << intValue2 << std::endl;
             break;
-        case 2:  // sub
+        case 2:  // Subtraction
             response.inResult = htonl(intValue1 - intValue2);
-            std::cout << "Assignment: sub " << intValue1 << " " << intValue2 << std::endl;
+            std::cout << "ASSIGNMENT: sub " << intValue1 << " " << intValue2 << std::endl;
             break;
-        case 3:  // mul
+        case 3:  // Multiplication
             response.inResult = htonl(intValue1 * intValue2);
-            std::cout << "Assignment: mul " << intValue1 << " " << intValue2 << std::endl;
+            std::cout << "ASSIGNMENT: mul " << intValue1 << " " << intValue2 << std::endl;
             break;
-        case 4:  // div
+        case 4:  // Division
             if (intValue2 != 0) {
                 response.inResult = htonl(intValue1 / intValue2);
-                std::cout << "Assignment: mul " << intValue1 << " "<< intValue2 << std::endl;
+                std::cout << "ASSIGNMENT: div " << intValue1 << " " << intValue2 << std::endl;
             } else {
                 std::cerr << "Division by zero error!" << std::endl;
+                return;
             }
             break;
-        case 5:  // fadd
+        case 5:  // Floating-point Addition
             response.flResult = flValue1 + flValue2;
-            std::cout << "Assignment: fadd " << flValue1 << " " << flValue2 << std::endl;
+            std::cout << "ASSIGNMENT: fadd " << flValue1 << " " << flValue2 << std::endl;
             break;
-        case 6:  // fsub
+        case 6:  // Floating-point Subtraction
             response.flResult = flValue1 - flValue2;
-            std::cout << "Assignment: fsub " << flValue1 << " " << flValue2 << std::endl;
+            std::cout << "ASSIGNMENT: fsub " << flValue1 << " " << flValue2 << std::endl;
             break;
-        case 7:  // fmul
+        case 7:  // Floating-point Multiplication
             response.flResult = flValue1 * flValue2;
-            std::cout << "Assignment: fmul " << flValue1 << " " << flValue2 << std::endl;
+            std::cout << "ASSIGNMENT: fmul " << flValue1 << " " << flValue2 << std::endl;
             break;
-        case 8:  // fdiv
+        case 8:  // Floating-point Division
             if (flValue2 != 0.0) {
                 response.flResult = flValue1 / flValue2;
-                std::cout << "Assignment: fdiv " << flValue1 << " " << flValue2 << std::endl;
+                std::cout << "ASSIGNMENT: fdiv " << flValue1 << " " << flValue2 << std::endl;
             } else {
                 std::cerr << "Division by zero error!" << std::endl;
+                return;
             }
             break;
         default:
             std::cerr << "Invalid arithmetic operation code: " << arith << std::endl;
-            break;
+            return;
     }
-}
 
+    // Update calcprotocal struct for sending back to server. Change the type equals to 2 so that specifies client to server message. 
+    response.type = htons(2); 
+    response.major_version = htons(1);
+    response.minor_version = htons(0);
+
+    // Send the updated struct back to the server.
+    ssize_t sentBytes = sendto(sockfd, &response, sizeof(response), 0, res->ai_addr, res->ai_addrlen);
+    if (sentBytes < 0) {
+        perror("Failed to send result to server");
+    }
+    // Wait for and process server's confirmation response
+    calcMessage serverResponse;
+    socklen_t addrLen = res->ai_addrlen;
+
+    struct timeval timeout;
+    timeout.tv_sec = 2;  // Set timeout of 2 seconds
+    timeout.tv_usec = 0;
+
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(sockfd, &readfds);
+
+    int selectResult = select(sockfd + 1, &readfds, nullptr, nullptr, &timeout);
+    
+    if (selectResult > 0 && FD_ISSET(sockfd, &readfds)) {
+    ssize_t receivedBytes = recvfrom(sockfd, &serverResponse, sizeof(serverResponse), 0, res->ai_addr, &addrLen);
+    if (receivedBytes > 0) {
+        // Check the 'message' field in the server's response
+        int serverMessage = ntohl(serverResponse.message);
+        if (serverMessage == 1) {
+            std::cout << "OK" << std::endl;
+        } else {
+            std::cout << "NOT OK" << std::endl;
+        }
+    } else {
+        perror("Failed to receive server's response");
+    }
+    } else if (selectResult == 0) {
+    std::cerr << "Timeout waiting for server's response." << std::endl;
+    } else {
+    perror("Error while waiting for server's response");
+    }
+
+}
 
 // Function to send and receive message with retry
 bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& message, calcProtocol& response) {
@@ -172,7 +215,7 @@ int main(int argc, char *argv[]) {
 
     // Attempt to send and receive response with retries
     if (sendAndReceiveWithRetry(sockfd, res, message, response)) {
-    performCalculation(response);
+     performCalculation(response, sockfd, res);
 }
 
     // Clean up
