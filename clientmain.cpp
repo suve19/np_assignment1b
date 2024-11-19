@@ -49,13 +49,15 @@ bool parseIpPort(const std::string& input, std::string& ip, int& port) {
     return true;
 }
 
+
 void performCalculation(calcProtocol& response, int sockfd, struct addrinfo* res) {
     int arith = ntohl(response.arith);
     int intValue1 = ntohl(response.inValue1);
     int intValue2 = ntohl(response.inValue2);
-    double flValue1 = response.flValue1;  
-    double flValue2 = response.flValue2;  
+    double flValue1 = response.flValue1;
+    double flValue2 = response.flValue2;
 
+    // Perform the calculation based on the arithmetic operation code
     switch (arith) {
         case 1:  // Addition
             response.inResult = htonl(intValue1 + intValue2);
@@ -104,50 +106,66 @@ void performCalculation(calcProtocol& response, int sockfd, struct addrinfo* res
             return;
     }
 
-    // Update calcprotocal struct for sending back to server. Change the type equals to 2 so that specifies client to server message. 
-    response.type = htons(2); 
+    // Update response message for sending back to the server
+    response.type = htons(2);
     response.major_version = htons(1);
     response.minor_version = htons(0);
 
-    // Send the updated struct back to the server.
-    ssize_t sentBytes = sendto(sockfd, &response, sizeof(response), 0, res->ai_addr, res->ai_addrlen);
-    if (sentBytes < 0) {
-        perror("Failed to send result to server");
-    }
-    // Wait for and process server's confirmation response
-    calcMessage serverResponse;
+    const int maxRetries = 3;
+    const int timeoutSec = 2;
     socklen_t addrLen = res->ai_addrlen;
 
-    struct timeval timeout;
-    timeout.tv_sec = 2;  // Set timeout of 2 seconds
-    timeout.tv_usec = 0;
-
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(sockfd, &readfds);
-
-    int selectResult = select(sockfd + 1, &readfds, nullptr, nullptr, &timeout);
-    
-    if (selectResult > 0 && FD_ISSET(sockfd, &readfds)) {
-    ssize_t receivedBytes = recvfrom(sockfd, &serverResponse, sizeof(serverResponse), 0, res->ai_addr, &addrLen);
-    if (receivedBytes > 0) {
-        // Check the 'message' field in the server's response
-        int serverMessage = ntohl(serverResponse.message);
-        if (serverMessage == 1) {
-            std::cout << "OK" << std::endl;
-        } else {
-            std::cout << "NOT OK" << std::endl;
+    for (int attempt = 1; attempt <= maxRetries; ++attempt) {
+        // Send the result to the server
+        ssize_t sentBytes = sendto(sockfd, &response, sizeof(response), 0, res->ai_addr, res->ai_addrlen);
+        if (sentBytes < 0) {
+            perror("Failed to send result to server");
+            exit(EXIT_FAILURE);
         }
-    } else {
-        perror("Failed to receive server's response");
-    }
-    } else if (selectResult == 0) {
-    std::cerr << "Timeout waiting for server's response." << std::endl;
-    } else {
-    perror("Error while waiting for server's response");
+
+        // Set up timeout for receiving confirmation
+        struct timeval timeout;
+        timeout.tv_sec = timeoutSec;
+        timeout.tv_usec = 0;
+
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(sockfd, &readfds);
+
+        // Wait for server's confirmation
+        int selectResult = select(sockfd + 1, &readfds, nullptr, nullptr, &timeout);
+        if (selectResult > 0 && FD_ISSET(sockfd, &readfds)) {
+            // Receive server's response
+            calcMessage serverResponse;
+            ssize_t receivedBytes = recvfrom(sockfd, &serverResponse, sizeof(serverResponse), 0, res->ai_addr, &addrLen);
+            if (receivedBytes > 0) {
+                int serverMessage = ntohl(serverResponse.message);
+                if (serverMessage == 1) {
+                    if (arith < 5) {
+                        std::cout << "OK (myresult=" << ntohl(response.inResult) << ")" << std::endl;
+                    } else {
+                        std::cout << "OK (myresult=" << response.flResult << ")" << std::endl;
+                    }
+                    return; 
+                } else {
+                    std::cout << "NOT OK" << std::endl;
+                }
+            } else {
+                perror("Failed to receive server's response");
+                exit(EXIT_FAILURE);
+            }
+        } else if (selectResult == 0) {
+            continue;
+        } else {
+            perror("Error while waiting for server's response");
+            exit(EXIT_FAILURE);
+        }
     }
 
+    std::cerr << "No response from server after " << maxRetries << " attempts. Exiting." << std::endl;
+    exit(EXIT_FAILURE);
 }
+
 
 // Function to send and receive message with retry
 bool sendAndReceiveWithRetry(int sockfd, struct addrinfo* res, calcMessage& message, calcProtocol& response) {
