@@ -8,7 +8,7 @@
 #include <sys/time.h>
 #include "protocol.h"
 #include <cstdio>
-
+// #define DEBUG
 
 // Function to print usage and exit
 void printUsageAndExit() {
@@ -106,6 +106,13 @@ void performCalculation(calcProtocol& response, int sockfd, struct addrinfo* res
             return;
     }
 
+#ifdef DEBUG
+    if (arith < 5) {
+        std::cout << "Calculated the result: " << ntohl(response.inResult) << std::endl;
+    } else {
+        std::cout << "Calculated the result: " << response.flResult << std::endl;
+    }
+#endif
     // Update response message for sending back to the server
     response.type = htons(2);
     response.major_version = htons(1);
